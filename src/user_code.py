@@ -39,7 +39,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         item = {key: value[idx] for key, value in self.encodings.items()}
-        item["labels"] = self.classes[idx] # 真の値のkeyはlabelsでなければならない
+        item["labels"] = self.classes[idx]  # 真の値のkeyはlabelsでなければならない
         return item
 
     def __len__(self):
@@ -83,6 +83,7 @@ class ChatbotModelEvaluation:
     label: 回答データのUUID
     class: 回答データのUUIDを分類問題で扱いやすいように整数の値変更したもの
     """
+
     def __init__(
         self,
         model_name: str = "cl-tohoku/bert-base-japanese",
@@ -118,29 +119,48 @@ class ChatbotModelEvaluation:
     def get_label_by_class(self, _class: int):
         return self.class_2_label[_class]
 
-    def _load_data(self, file_paths: list[str], element_2_index_map: dict = {"text": 0, "label": 2}):
+    def _load_data(
+        self, file_paths: list[str], element_2_index_map: dict = {"text": 0, "label": 2}
+    ):
         texts_already_taken_into_account = []
         texts, classes = [], []
         for i_file_path, file_path in enumerate(file_paths):
-            logger.info(f"[ {i_file_path+1} / {len(file_paths)} ] Load data from {file_path}")
+            logger.info(
+                f"[ {i_file_path+1} / {len(file_paths)} ] Load data from {file_path}"
+            )
             with open(file_path, mode="r") as f:
                 reader = csv.reader(f)
                 for i_row, row in enumerate(reader):
                     if i_row > 0:
-                        if (not row[element_2_index_map["text"]] in texts_already_taken_into_account):
-                            texts_already_taken_into_account.append(row[element_2_index_map["text"]])
+                        if (
+                            not row[element_2_index_map["text"]]
+                            in texts_already_taken_into_account
+                        ):
+                            texts_already_taken_into_account.append(
+                                row[element_2_index_map["text"]]
+                            )
                             texts.append(row[element_2_index_map["text"]])
-                            classes.append(self.get_class_by_label(label=row[element_2_index_map["label"]]))
+                            classes.append(
+                                self.get_class_by_label(
+                                    label=row[element_2_index_map["label"]]
+                                )
+                            )
 
         return texts, classes
 
     def load_train_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
         logger.info(f"Load training data")
-        return self._load_data(file_paths=self.train_data_file_paths, element_2_index_map=element_2_index_map)
+        return self._load_data(
+            file_paths=self.train_data_file_paths,
+            element_2_index_map=element_2_index_map,
+        )
 
     def load_test_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
         logger.info(f"Load test data")
-        return self._load_data(file_paths=self.test_data_file_paths, element_2_index_map=element_2_index_map)
+        return self._load_data(
+            file_paths=self.test_data_file_paths,
+            element_2_index_map=element_2_index_map,
+        )
 
     def set_number_of_unique_classes(self):
         logger.info("Set the number of unique classes")
@@ -178,10 +198,16 @@ class ChatbotModelEvaluation:
         padding: bool = True,
     ):
         train_encodings = self.tokenizer(
-            train_texts, truncation=truncation, padding=padding, return_tensors="pt",
+            train_texts,
+            truncation=truncation,
+            padding=padding,
+            return_tensors="pt",
         )
         validation_encodings = self.tokenizer(
-            validation_texts, truncation=truncation, padding=padding, return_tensors="pt",
+            validation_texts,
+            truncation=truncation,
+            padding=padding,
+            return_tensors="pt",
         )
 
         return train_encodings, validation_encodings
@@ -192,9 +218,13 @@ class ChatbotModelEvaluation:
         for key in train_encodings:
             train_encodings[key] = train_encodings[key].clone().detach().to(self.device)
         for key in validation_encodings:
-            validation_encodings[key] = validation_encodings[key].clone().detach().to(self.device)
+            validation_encodings[key] = (
+                validation_encodings[key].clone().detach().to(self.device)
+            )
         train_classes = torch.tensor(train_classes).clone().detach().to(self.device)
-        validation_classes = torch.tensor(validation_classes).clone().detach().to(self.device)
+        validation_classes = (
+            torch.tensor(validation_classes).clone().detach().to(self.device)
+        )
 
         train_dataset = Dataset(train_encodings, train_classes)
         validation_dataset = Dataset(validation_encodings, validation_classes)
@@ -214,7 +244,7 @@ class ChatbotModelEvaluation:
             save_strategy="epoch",  # パラメータなどの情報を保存するタイミング
             warmup_steps=500,  # ウォームアップステップ数
             weight_decay=0.01,  # Weight decay
-            no_cuda=not torch.cuda.is_available(), # GPUを使用するかどうかのフラグ
+            no_cuda=not torch.cuda.is_available(),  # GPUを使用するかどうかのフラグ
         )
 
         data_collator = DataCollatorWithPadding(self.tokenizer)
