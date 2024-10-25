@@ -38,10 +38,8 @@ class Dataset(torch.utils.data.Dataset):
         self.classes = classes
 
     def __getitem__(self, idx):
-        item = {key: torch.tensor(value[idx]) for key, value in self.encodings.items()}
-        item["labels"] = torch.tensor(
-            self.classes[idx]
-        )  # 真の値のkeyはlabelsでなければならない
+        item = {key: value[idx] for key, value in self.encodings.items()}
+        item["labels"] = self.classes[idx] # 真の値のkeyはlabelsでなければならない
         return item
 
     def __len__(self):
@@ -81,22 +79,32 @@ class CustomCallback(TrainerCallback):
 
 
 class ChatbotModelEvaluation:
+    """
+    label: 回答データのUUID
+    class: 回答データのUUIDを分類問題で扱いやすいように整数の値変更したもの
+    """
     def __init__(
         self,
         model_name: str = "cl-tohoku/bert-base-japanese",
         train_data_file_paths: list[str] = [
-            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-004/gen_gpt4_upto0.csv"
+            f"{os.path.dirname(__file__)}/train_data_file.csv",
         ],
-        test_data_file_path: str = f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/train/train.csv",
+        test_data_file_paths: str = [
+            f"{os.path.dirname(__file__)}/test_data_file.csv",
+        ],
     ):
         self.model_name = model_name
         self.train_data_file_paths = train_data_file_paths
-        self.test_data_file_path = test_data_file_path
+        self.test_data_file_paths = test_data_file_paths
+
         self.number_of_classes = 0
         self.label_2_class = {}
         self.class_2_label = {}
         self.tokenizer = None
         self.model = None
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"{self.device} will be used in the following series.")
 
     def get_class_by_label(self, label: str):
         if not label in self.label_2_class:
@@ -110,45 +118,29 @@ class ChatbotModelEvaluation:
     def get_label_by_class(self, _class: int):
         return self.class_2_label[_class]
 
-    def load_train_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
-        logger.info(f"Load training data")
+    def _load_data(self, file_paths: list[str], element_2_index_map: dict = {"text": 0, "label": 2}):
         texts_already_taken_into_account = []
-        train_texts, train_classes = [], []
-        for train_data_file_path in self.train_data_file_paths:
-            logger.info(f"Load training data from {train_data_file_path}")
-            with open(train_data_file_path, mode="r") as f:
+        texts, classes = [], []
+        for i_file_path, file_path in enumerate(file_paths):
+            logger.info(f"[ {i_file_path+1} / {len(file_paths)} ] Load data from {file_path}")
+            with open(file_path, mode="r") as f:
                 reader = csv.reader(f)
                 for i_row, row in enumerate(reader):
                     if i_row > 0:
-                        if (
-                            not row[element_2_index_map["text"]]
-                            in texts_already_taken_into_account
-                        ):
-                            texts_already_taken_into_account.append(
-                                row[element_2_index_map["text"]]
-                            )
-                            train_texts.append(row[element_2_index_map["text"]])
-                            train_classes.append(
-                                self.get_class_by_label(
-                                    label=row[element_2_index_map["label"]]
-                                )
-                            )
+                        if (not row[element_2_index_map["text"]] in texts_already_taken_into_account):
+                            texts_already_taken_into_account.append(row[element_2_index_map["text"]])
+                            texts.append(row[element_2_index_map["text"]])
+                            classes.append(self.get_class_by_label(label=row[element_2_index_map["label"]]))
 
-        return train_texts, train_classes
+        return texts, classes
+
+    def load_train_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
+        logger.info(f"Load training data")
+        return self._load_data(file_paths=self.train_data_file_paths, element_2_index_map=element_2_index_map)
 
     def load_test_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
-        logger.info(f"Load test data from {self.test_data_file_path}")
-        test_texts, test_classes = [], []
-        with open(self.test_data_file_path, mode="r") as f:
-            reader = csv.reader(f)
-            for i_row, row in enumerate(reader):
-                if i_row > 0:
-                    test_texts.append(row[element_2_index_map["text"]])
-                    test_classes.append(
-                        self.get_class_by_label(label=row[element_2_index_map["label"]])
-                    )
-
-        return test_texts, test_classes
+        logger.info(f"Load test data")
+        return self._load_data(file_paths=self.test_data_file_paths, element_2_index_map=element_2_index_map)
 
     def set_number_of_unique_classes(self):
         logger.info("Set the number of unique classes")
@@ -159,7 +151,7 @@ class ChatbotModelEvaluation:
         self.tokenizer = BertJapaneseTokenizer.from_pretrained(self.model_name)
         self.model = BertForSequenceClassification.from_pretrained(
             self.model_name, num_labels=self.number_of_classes
-        )
+        ).to(self.device)
 
     def train_validation_split(
         self, train_texts, train_classes, validation_size: float = 0.2
@@ -186,10 +178,10 @@ class ChatbotModelEvaluation:
         padding: bool = True,
     ):
         train_encodings = self.tokenizer(
-            train_texts, truncation=truncation, padding=padding
+            train_texts, truncation=truncation, padding=padding, return_tensors="pt",
         )
         validation_encodings = self.tokenizer(
-            validation_texts, truncation=truncation, padding=padding
+            validation_texts, truncation=truncation, padding=padding, return_tensors="pt",
         )
 
         return train_encodings, validation_encodings
@@ -197,23 +189,32 @@ class ChatbotModelEvaluation:
     def convert_into_torch_dataset(
         self, train_encodings, validation_encodings, train_classes, validation_classes
     ):
+        for key in train_encodings:
+            train_encodings[key] = train_encodings[key].clone().detach().to(self.device)
+        for key in validation_encodings:
+            validation_encodings[key] = validation_encodings[key].clone().detach().to(self.device)
+        train_classes = torch.tensor(train_classes).clone().detach().to(self.device)
+        validation_classes = torch.tensor(validation_classes).clone().detach().to(self.device)
+
         train_dataset = Dataset(train_encodings, train_classes)
         validation_dataset = Dataset(validation_encodings, validation_classes)
+
         return train_dataset, validation_dataset
 
     def training(self, train_dataset, validation_dataset):
         training_arguments = TrainingArguments(
             eval_strategy="steps",  # evalデータセットに対し評価を行うタイミング
             eval_steps=100,  # evalデータセットに対し評価を行う間隔
-            logging_dir="./logs",  # ログ出力ディレクトリ
+            logging_dir="../logs",  # ログ出力ディレクトリ
             logging_steps=100,  # ロギングの頻度
-            num_train_epochs=20,  # エポック数
-            output_dir="./results/prompt-001",  # 出力ディレクトリ
+            num_train_epochs=1,  # エポック数
+            output_dir="../results",  # 出力ディレクトリ
             per_device_train_batch_size=16,  # トレーニングバッチサイズ
             per_device_eval_batch_size=16,  # 評価バッチサイズ
             save_strategy="epoch",  # パラメータなどの情報を保存するタイミング
             warmup_steps=500,  # ウォームアップステップ数
             weight_decay=0.01,  # Weight decay
+            no_cuda=not torch.cuda.is_available(), # GPUを使用するかどうかのフラグ
         )
 
         data_collator = DataCollatorWithPadding(self.tokenizer)
@@ -234,11 +235,12 @@ class ChatbotModelEvaluation:
         test_texts,
         test_classes,
         batch_size: int = 8,
-        save_file_path=f"{os.path.dirname(__file__)}/test_results/checkpoint-2816.csv",
+        save_file_path=f"{os.path.dirname(__file__)}/../test_results/test_result.csv",
     ):
         test_encodings = self.tokenizer(
             test_texts, return_tensors="pt", truncation=True, padding=True
-        )
+        ).to(self.device)
+        test_classes = torch.tensor(test_classes).clone().detach().to(self.device)
 
         test_dataset = TensorDataset(
             test_encodings["input_ids"], test_encodings["attention_mask"]
@@ -276,18 +278,17 @@ class ChatbotModelEvaluation:
 
 
 if __name__ == "__main__":
-    prompt_id = "prompt-001234"
-    step = "3270"
     evaluator = ChatbotModelEvaluation(
         model_name="cl-tohoku/bert-base-japanese-whole-word-masking",
-        # model_name=f"results/{prompt_id}/checkpoint-{step}",
         train_data_file_paths=[
-            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto25.csv",
-            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-002/gen_gpt4_upto0.csv",
-            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-003/gen_gpt4_upto0.csv",
-            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-004/gen_gpt4_upto0.csv",
+            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt1_gpt4_upto25.csv",
+            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt2_gpt4_upto0.csv",
+            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt3_gpt4_upto0.csv",
+            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt4_gpt4_upto0.csv",
         ],
-        test_data_file_path=f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/train/train.csv",
+        test_data_file_paths=[
+            f"{os.path.dirname(__file__)}/../dataset/test/train.csv",
+        ],
     )
     train_texts, train_classes = evaluator.load_train_data(
         element_2_index_map={"text": 0, "label": 2}
@@ -321,5 +322,5 @@ if __name__ == "__main__":
         test_texts=test_texts,
         test_classes=test_classes,
         batch_size=8,
-        save_file_path=f"{os.path.dirname(__file__)}/test_results/{prompt_id}/checkpoint-{step}.csv",
+        save_file_path=f"{os.path.dirname(__file__)}/../test_results/test_result.csv",
     )
