@@ -31,6 +31,38 @@ handler_format = logging.Formatter(
 stream_handler.setFormatter(handler_format)
 logger.addHandler(stream_handler)
 
+import argparse
+
+parser = argparse.ArgumentParser(description="Use more complex ML model for chatbot")
+parser.add_argument(
+    "--model",
+    dest="model",
+    help="Model name",
+    default="cl-tohoku/bert-base-japanese-whole-word-masking",
+    type=str,
+)
+parser.add_argument(
+    "--train", dest="train", help="Enable training", action="store_true"
+)
+parser.add_argument("--test", dest="test", help="Enable testing", action="store_true")
+parser.add_argument(
+    "--epochs",
+    dest="epochs",
+    help="The number of epochs",
+    action="store",
+    default=10,
+    type=int,
+)
+parser.add_argument(
+    "--test_ratio",
+    dest="test_ratio",
+    help="Ratio of test data",
+    action="store",
+    default=0.1,
+    type=float,
+)
+args = parser.parse_args()
+
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, encodings, classes):
@@ -90,12 +122,16 @@ class ChatbotModelEvaluation:
         train_data_file_paths: list[str] = [
             f"{os.path.dirname(__file__)}/train_data_file.csv",
         ],
+        validation_data_file_paths: list[str] = [
+            f"{os.path.dirname(__file__)}/validation_data_file.csv",
+        ],
         test_data_file_paths: str = [
             f"{os.path.dirname(__file__)}/test_data_file.csv",
         ],
     ):
         self.model_name = model_name
         self.train_data_file_paths = train_data_file_paths
+        self.validation_data_file_paths = validation_data_file_paths
         self.test_data_file_paths = test_data_file_paths
 
         self.number_of_classes = 0
@@ -155,6 +191,13 @@ class ChatbotModelEvaluation:
             element_2_index_map=element_2_index_map,
         )
 
+    def load_validation_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
+        logger.info(f"Load validation data")
+        return self._load_data(
+            file_paths=self.validation_data_file_paths,
+            element_2_index_map=element_2_index_map,
+        )
+
     def load_test_data(self, element_2_index_map: dict = {"text": 0, "label": 2}):
         logger.info(f"Load test data")
         return self._load_data(
@@ -177,7 +220,7 @@ class ChatbotModelEvaluation:
         self, train_texts, train_classes, validation_size: float = 0.2
     ):
         logger.info(
-            f"Split training data into train ({1 - validation_size}) and validation ({validation_size})"
+            f"Split training data into training ({1 - validation_size}) and validation ({validation_size})"
         )
         train_texts, validation_texts, train_classes, validation_classes = (
             train_test_split(
@@ -232,13 +275,16 @@ class ChatbotModelEvaluation:
         return train_dataset, validation_dataset
 
     def training(self, train_dataset, validation_dataset):
+        output_dir = (
+            f"../results/{'/'.join(self.train_data_file_paths[0].split('/')[-2:-1])}"
+        )
         training_arguments = TrainingArguments(
             eval_strategy="steps",  # evalデータセットに対し評価を行うタイミング
             eval_steps=100,  # evalデータセットに対し評価を行う間隔
             logging_dir="../logs",  # ログ出力ディレクトリ
             logging_steps=100,  # ロギングの頻度
-            num_train_epochs=1,  # エポック数
-            output_dir="../results",  # 出力ディレクトリ
+            num_train_epochs=args.epochs,  # エポック数
+            output_dir=output_dir,  # 出力ディレクトリ
             per_device_train_batch_size=16,  # トレーニングバッチサイズ
             per_device_eval_batch_size=16,  # 評価バッチサイズ
             save_strategy="epoch",  # パラメータなどの情報を保存するタイミング
@@ -298,7 +344,7 @@ class ChatbotModelEvaluation:
             for i, (text, truth, prediction) in enumerate(
                 zip(test_texts, test_classes, all_predicted_classes)
             ):
-                writer.writerow([text, truth, prediction])
+                writer.writerow([text, truth.item(), prediction])
                 if i % 100 == 0:
                     print(f"Text: {text}, Truth: {truth}, Prediction: {prediction}")
 
@@ -309,33 +355,40 @@ class ChatbotModelEvaluation:
 
 if __name__ == "__main__":
     evaluator = ChatbotModelEvaluation(
-        model_name="cl-tohoku/bert-base-japanese-whole-word-masking",
+        model_name=args.model,
         train_data_file_paths=[
-            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt1_gpt4_upto25.csv",
-            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt2_gpt4_upto0.csv",
-            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt3_gpt4_upto0.csv",
-            f"{os.path.dirname(__file__)}/../dataset/train/gen_prompt4_gpt4_upto0.csv",
+            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt35_upto3.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt35_upto5.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt35_upto10.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt35_upto15.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt35_upto20.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto3.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto5.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto10.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto15.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto20.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto25.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-002/gen_gpt4_upto0.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-003/gen_gpt4_upto0.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-004/gen_gpt4_upto0.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-005/gen_gpt4_upto0.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-006/gen_gpt4_upto7.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-007/gen_gpt4_upto20.csv",
+            # f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-008/gen_gpt4_upto25.csv",
+        ],
+        validation_data_file_paths=[
+            f"{os.path.dirname(__file__)}/../../chatbot-effective-data-creation/data/OPEN-UI/generated/prompt-001/gen_gpt4_upto25.csv",
         ],
         test_data_file_paths=[
             f"{os.path.dirname(__file__)}/../dataset/test/train.csv",
         ],
     )
-    train_texts, train_classes = evaluator.load_train_data(
-        element_2_index_map={"text": 0, "label": 2}
-    )
-    test_texts, test_classes = evaluator.load_test_data(
-        element_2_index_map={"text": 0, "label": 2}
-    )
+    train_texts, train_classes = evaluator.load_train_data()
+    validation_texts, validation_classes = evaluator.load_validation_data()
+    test_texts, test_classes = evaluator.load_test_data()
     evaluator.set_number_of_unique_classes()
     evaluator.set_label_by_class()
     evaluator.set_tokenizer_and_model()
-    train_texts, validation_texts, train_classes, validation_classes = (
-        evaluator.train_validation_split(
-            train_texts=train_texts,
-            train_classes=train_classes,
-            validation_size=0.2,
-        )
-    )
     train_encodings, validation_encodings = evaluator.tokenization(
         train_texts=train_texts, validation_texts=validation_texts
     )
@@ -345,12 +398,14 @@ if __name__ == "__main__":
         train_classes=train_classes,
         validation_classes=validation_classes,
     )
-    evaluator.training(
-        train_dataset=train_dataset, validation_dataset=validation_dataset
-    )
-    evaluator.testing(
-        test_texts=test_texts,
-        test_classes=test_classes,
-        batch_size=8,
-        save_file_path=f"{os.path.dirname(__file__)}/../test_results/test_result.csv",
-    )
+    if args.train:
+        evaluator.training(
+            train_dataset=train_dataset, validation_dataset=validation_dataset
+        )
+    if args.test:
+        evaluator.testing(
+            test_texts=test_texts,
+            test_classes=test_classes,
+            batch_size=8,
+            save_file_path=f"{os.path.dirname(__file__)}/{args.model}/test_result.csv",
+        )

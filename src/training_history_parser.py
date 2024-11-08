@@ -21,7 +21,7 @@ logger.addHandler(stream_handler)
 class TrainingHistoryParser:
     def __init__(
         self,
-        result_file_path: str = f"{os.path.dirname(__file__)}/results/checkpoint-6336/trainer_state.json",
+        result_file_path: str = f"{os.path.dirname(__file__)}/../results/result.json",
     ):
         self.result_file_path = result_file_path
         self.train_loss_histories = {}
@@ -42,7 +42,7 @@ class TrainingHistoryParser:
                 )
 
     def get_step_vs_loss(
-        self, plot_name=f"{os.path.dirname(__file__)}/deliverables/step_vs_loss.png"
+        self, plot_name=f"{os.path.dirname(__file__)}/../deliverables/step_vs_loss.png"
     ):
         if not os.path.exists(os.path.dirname(plot_name)):
             os.makedirs(os.path.dirname(plot_name))
@@ -74,7 +74,7 @@ class TrainingHistoryParser:
 class TestResultParser:
     def __init__(
         self,
-        test_result_file_path: str = f"{os.path.dirname(__file__)}/test_results/checkpoint-2816.csv",
+        test_result_file_path: str = f"{os.path.dirname(__file__)}/../test_results/result.csv",
     ):
         self.test_result_file_path = test_result_file_path
         self.test_result_dict = {}
@@ -115,17 +115,16 @@ class TestResultParser:
 
 
 if __name__ == "__main__":
-    prompt_id = "prompt-001"
     parser = TrainingHistoryParser(
-        result_file_path=f"{os.path.dirname(__file__)}/results/{prompt_id}/checkpoint-3270/trainer_state.json"
+        result_file_path=f"{os.path.dirname(__file__)}/../results/checkpoint-42976/trainer_state.json"
     )
     parser.parse()
     parser.get_step_vs_loss(
-        plot_name=f"{os.path.dirname(__file__)}/deliverables/step_vs_loss.png"
+        plot_name=f"{os.path.dirname(__file__)}/../deliverables/step_vs_loss.png"
     )
 
     parser = TestResultParser(
-        test_result_file_path=f"{os.path.dirname(__file__)}/test_results/{prompt_id}/checkpoint-3270.csv"
+        test_result_file_path=f"{os.path.dirname(__file__)}/../test_results/test_result.csv"
     )
     parser.parse()
     parser.get_accuracy()
